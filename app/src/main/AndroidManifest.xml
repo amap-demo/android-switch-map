@@ -23,10 +23,10 @@
         android:theme="@style/AppTheme" >
         <meta-data
             android:name="com.amap.api.v2.apikey"
-            android:value="e181fd30437c60aef46c918acf841af4"/>
+            android:value="您的amap-key"/>
         <meta-data
             android:name="com.google.android.maps.v2.API_KEY"
-            android:value="AIzaSyA7lfWvyfhjzajvvsDs0eyer2ufnhaFVCI"/>
+            android:value="您的google-key"/>
         <activity android:name=".MainActivity" >
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
