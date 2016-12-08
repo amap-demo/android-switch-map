@@ -9,8 +9,8 @@ android {
             abiFilters 'armeabi-v7a'
         }
         applicationId "amap.com.amapandgoogle"
-        minSdkVersion 22
-        targetSdkVersion 23
+        minSdkVersion 9
+        targetSdkVersion 22
         versionCode 1
         versionName "1.0"
         testInstrumentationRunner "android.support.test.runner.AndroidJUnitRunner"
