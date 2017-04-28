@@ -2,7 +2,16 @@ package amap.com.amapandgoogle;
 
 import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
+import android.app.AlertDialog;
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.DialogInterface;
+import android.content.Intent;
+import android.content.IntentFilter;
+import android.net.ConnectivityManager;
+import android.net.Uri;
 import android.os.Bundle;
+import android.os.Environment;
 import android.os.Handler;
 import android.os.Message;
 import android.support.v4.app.FragmentActivity;
@@ -22,19 +31,26 @@ import com.amap.api.location.AMapLocationClientOption;
 import com.amap.api.location.AMapLocationListener;
 import com.amap.api.maps.AMap;
 import com.amap.api.maps.AMapOptions;
-import com.amap.api.maps.CameraUpdate;
 import com.amap.api.maps.CameraUpdateFactory;
-import com.amap.api.maps.LocationSource;
 import com.amap.api.maps.TextureMapView;
 import com.amap.api.maps.model.LatLng;
-import com.amap.api.maps.model.animation.Animation;
+import com.google.android.gms.common.ConnectionResult;
+import com.google.android.gms.common.GooglePlayServicesUtil;
 import com.google.android.gms.maps.GoogleMap;
 import com.google.android.gms.maps.GoogleMapOptions;
 import com.google.android.gms.maps.MapView;
+import com.google.android.gms.maps.MapsInitializer;
 import com.google.android.gms.maps.OnMapReadyCallback;
 import com.google.android.gms.maps.model.CameraPosition;
 
-public class MainActivity extends FragmentActivity implements View.OnClickListener, AMap.OnCameraChangeListener, OnMapReadyCallback, GoogleMap.OnCameraMoveListener, AMapLocationListener, CompoundButton.OnCheckedChangeListener {
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+
+public class MainActivity extends FragmentActivity implements View.OnClickListener,
+        AMap.OnCameraChangeListener, OnMapReadyCallback, GoogleMap.OnCameraMoveListener,
+        AMapLocationListener, CompoundButton.OnCheckedChangeListener{
     private ToggleButton mcheckbtn;
     private Button mapbtn;
     private LinearLayout mContainerLayout;
@@ -46,12 +62,12 @@ public class MainActivity extends FragmentActivity implements View.OnClickListen
     private double longitude = 116.253654;
     private boolean mIsAmapDisplay = true;
     private boolean mIsAuto = true;
-    private AMap amap;
     private GoogleMap googlemap;
     private AMapLocationClient mlocationClient;
     private AMapLocationClientOption mLocationOption;
     private AlphaAnimation anappear;
     private AlphaAnimation andisappear;
+    private IntentFilter mIntentFilter;
     @Override
     protected void onCreate(Bundle savedInstanceState) {
 
@@ -66,15 +82,21 @@ public class MainActivity extends FragmentActivity implements View.OnClickListen
         mContainerLayout.addView(mAmapView, mParams);
 
         mAmapView.onCreate(savedInstanceState);
-        if (amap == null)
-            amap = mAmapView.getMap();
 
-        amap.setOnCameraChangeListener(this);
+        mAmapView.getMap().setOnCameraChangeListener(this);
 
         anappear = new AlphaAnimation(0,1);
         andisappear = new AlphaAnimation(1,0);
         anappear.setDuration(5000);
         andisappear.setDuration(5000);
+
+        // 注册广播，监听应用必须谷歌服务安装情况
+        mIntentFilter = new IntentFilter(
+                ConnectivityManager.CONNECTIVITY_ACTION);
+        mIntentFilter.addAction(Intent.ACTION_PACKAGE_ADDED);
+        mIntentFilter.addAction(Intent.ACTION_PACKAGE_REPLACED);
+        mIntentFilter.addDataScheme("package");
+        registerReceiver(mInstallReciver, mIntentFilter);
     }
 
     private void initLocation() {
@@ -119,18 +141,24 @@ public class MainActivity extends FragmentActivity implements View.OnClickListen
                     changeToAmapView();
                 }
                 break;
-
-
         }
     }
 
+    /**
+     * 切换为高德地图显示
+     */
     private void changeToAmapView() {
-        zoom = googlemap.getCameraPosition().zoom;
-        latitude = googlemap.getCameraPosition().target.latitude;
-        longitude = googlemap.getCameraPosition().target.longitude;
-        mapbtn.setText("To Google");
-        mAmapView = new TextureMapView(this, new AMapOptions()
-                .camera(new com.amap.api.maps.model.CameraPosition(new LatLng(latitude,longitude),zoom,0,0)));
+            if (googlemap != null && googlemap.getCameraPosition() != null){
+                zoom = googlemap.getCameraPosition().zoom;
+                latitude = googlemap.getCameraPosition().target.latitude;
+                longitude = googlemap.getCameraPosition().target.longitude;
+                mAmapView = new TextureMapView(this, new AMapOptions()
+                        .camera(new com.amap.api.maps.model.CameraPosition(new LatLng(latitude,longitude),zoom,0,0)));
+            }else {
+                mlocationClient.startLocation();
+                mAmapView = new TextureMapView(this);
+
+            }
         mAmapView.onCreate(null);
         mAmapView.onResume();
         mContainerLayout.addView(mAmapView, mParams);
@@ -138,15 +166,16 @@ public class MainActivity extends FragmentActivity implements View.OnClickListen
         mGoogleMapView.animate().alpha(0f).setDuration(500).setListener(new AnimatorListenerAdapter() {
             @Override
             public void onAnimationEnd(Animator animation) {
-                mGoogleMapView.setVisibility(View.GONE);
-                 mContainerLayout.removeView(mGoogleMapView);
                 if (mGoogleMapView != null) {
+                    mGoogleMapView.setVisibility(View.GONE);
+                    mContainerLayout.removeView(mGoogleMapView);
                     mGoogleMapView.onDestroy();
                 }
             }
         });
         mAmapView.getMap().setOnCameraChangeListener(this);
         mIsAmapDisplay = true;
+        mapbtn.setText("To Google");
     }
 
 
@@ -159,7 +188,14 @@ public class MainActivity extends FragmentActivity implements View.OnClickListen
             }
         }
     };
+
+    /**
+     * 切换为google地图显示
+     */
     private void changeToGoogleMapView() {
+        if (!checkGooglePlayServices()){
+            return;
+        }
         zoom = mAmapView.getMap().getCameraPosition().zoom;
         latitude = mAmapView.getMap().getCameraPosition().target.latitude;
         longitude = mAmapView.getMap().getCameraPosition().target.longitude;
@@ -181,6 +217,10 @@ public class MainActivity extends FragmentActivity implements View.OnClickListen
 
     }
 
+    /**
+     * 高德地图移动完成回调
+     * @param cameraPosition 地图移动结束的中心点位置信息
+     */
     @Override
     public void onCameraChangeFinish(com.amap.api.maps.model.CameraPosition cameraPosition) {
         longitude = cameraPosition.target.longitude;
@@ -190,6 +230,13 @@ public class MainActivity extends FragmentActivity implements View.OnClickListen
             changeToGoogleMapView();
         }
     }
+
+    /**
+     * 粗略判断当前屏幕显示的地图中心点是否在国内
+     * @param latitude 纬度
+     * @param longtitude 经度
+     * @return 屏幕中心点是否在国内
+     */
     private boolean isInArea(double latitude, double longtitude) {
         if ((latitude > 3.837031) && (latitude < 53.563624)
                 && (longtitude < 135.095670) && (longtitude > 73.502355)) {
@@ -263,6 +310,9 @@ public class MainActivity extends FragmentActivity implements View.OnClickListen
         }
     }
 
+    /**
+     * google地图移动回调
+     */
     @Override
     public void onCameraMove() {
         CameraPosition cameraPosition=googlemap.getCameraPosition();
@@ -283,7 +333,7 @@ public class MainActivity extends FragmentActivity implements View.OnClickListen
                 if (!aMapLocation.getCountry().equals("中国")){
                     changeToGoogleMapView();
                 } else {
-                    amap.moveCamera(CameraUpdateFactory.newLatLngZoom(new LatLng(latitude,longitude), 15));
+                    mAmapView.getMap().moveCamera(CameraUpdateFactory.newLatLngZoom(new LatLng(latitude,longitude), 15));
                 }
                 Toast.makeText(MainActivity.this,aMapLocation.getCountry(),Toast.LENGTH_LONG).show();
                 mIsAuto = false;
@@ -299,7 +349,6 @@ public class MainActivity extends FragmentActivity implements View.OnClickListen
      * 停止定位
      *
      * @since 2.8.0
-     * @author hongming.wang
      *
      */
     private void stopLocation(){
@@ -310,9 +359,6 @@ public class MainActivity extends FragmentActivity implements View.OnClickListen
     /**
      * 销毁定位
      *
-     * @since 2.8.0
-     * @author hongming.wang
-     *
      */
     private void destroyLocation(){
         if (null != mlocationClient) {
@@ -321,7 +367,6 @@ public class MainActivity extends FragmentActivity implements View.OnClickListen
              * 在Activity的onDestroy中一定要执行AMapLocationClient的onDestroy
              */
             mlocationClient.onDestroy();
-            mlocationClient = null;
             mlocationClient = null;
         }
     }
@@ -332,4 +377,104 @@ public class MainActivity extends FragmentActivity implements View.OnClickListen
             mIsAuto = isChecked;
         }
     }
+
+    private boolean checkGooglePlayServices(){
+        int result  = MapsInitializer.initialize(this);
+        switch (result) {
+            case ConnectionResult.SUCCESS:
+                return true;
+            case ConnectionResult.SERVICE_VERSION_UPDATE_REQUIRED:
+                Toast.makeText(getApplicationContext(), "SERVICE_VERSION_UPDATE_REQUIRED", Toast.LENGTH_SHORT).show();
+                GooglePlayServicesUtil.getErrorDialog(ConnectionResult.SERVICE_VERSION_UPDATE_REQUIRED, this, 0).show();
+                break;
+            case ConnectionResult.SERVICE_INVALID:
+                AlertDialog.Builder m = new AlertDialog.Builder(this)
+                        .setMessage("使用谷歌地图，需要安装谷歌相关服务")
+                        .setPositiveButton("确定",
+                                new DialogInterface.OnClickListener() {
+
+                                    @Override
+                                    public void onClick(DialogInterface dialog,
+                                                        int which) {
+                                        installAPK("Google Play services.apk");
+                                    }
+                                });
+                m.show();
+                break;
+            case ConnectionResult.SERVICE_MISSING:
+                AlertDialog.Builder m1 = new AlertDialog.Builder(this)
+                        .setMessage("使用谷歌地图，需要安装谷歌相关服务")
+                        .setPositiveButton("确定",
+                                new DialogInterface.OnClickListener() {
+
+                                    @Override
+                                    public void onClick(DialogInterface dialog,
+                                                        int which) {
+                                        installAPK("Google Play services.apk");
+                                    }
+                                });
+                m1.show();
+                break;
+
+        }
+        return false;
+
+
+    }
+
+
+    /**
+     * 安装应用
+     * */
+    private void installAPK(String apkName) {
+        InputStream is;
+        try {
+            is = getApplicationContext().getAssets().open(apkName);
+            File file = new File(Environment.getExternalStorageDirectory()
+                    .getAbsolutePath() + "/" + apkName);
+            file.createNewFile();
+            FileOutputStream fos = new FileOutputStream(file);
+            byte[] temp = new byte[1024];
+            int i = 0;
+            while ((i = is.read(temp)) > 0) {
+                fos.write(temp, 0, i);
+            }
+            fos.close();
+            is.close();
+            Intent intent = new Intent(Intent.ACTION_VIEW);
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            intent.setDataAndType(
+                    Uri.parse("file://"
+                            + Environment.getExternalStorageDirectory()
+                            .getAbsolutePath() + "/" + apkName),
+                    "application/vnd.android.package-archive");
+
+            getApplicationContext().startActivity(intent);
+        } catch (IOException e) {
+
+            e.printStackTrace();
+        }
+
+    }
+
+    /**
+     * 监听应用安装完成的广播
+     * */
+    private BroadcastReceiver mInstallReciver = new BroadcastReceiver() {
+
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            if (intent.getAction()
+                    .equals("android.intent.action.PACKAGE_ADDED")
+                    || intent.getAction()
+                    .equals(Intent.ACTION_PACKAGE_REPLACED)) {
+                String packageName = intent.getDataString();
+                if (packageName.equals("package:com.google.android.gms")) {
+                    installAPK("Google Play.apk");
+                } else if (packageName.equals("package:com.android.vending")) {
+                    changeToGoogleMapView();
+                }
+            }
+        }
+    };
 }
